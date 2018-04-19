@@ -310,8 +310,11 @@ class DSession:
         runner = self.config.pluginmanager.getplugin("runner")
         fspath = nodeid.split("::")[0]
         msg = "Worker %r crashed while running %r" % (worker.gateway.id, nodeid)
+        rerun_count = self.config.cache.get('xdist/rerun', 0)
+        test_status = "rerun" if rerun_count > 0 else "failed"
+        self.config.cache.set('xdist/rerun', rerun_count - 1)
         rep = runner.TestReport(nodeid, (fspath, None, fspath),
-                                (), "failed", msg, "???")
+                                (), test_status, msg, "???")
         rep.node = worker
         self.config.hook.pytest_runtest_logreport(report=rep)
 

@@ -199,7 +199,9 @@ class LoadScheduling:
             return
 
         # The node crashed, reassing pending items
-        crashitem = self.collection[pending.pop(0)]
+        rerun_count = self.config.cache.get('xdist/rerun', 0)
+        pending_item = pending[0] if rerun_count > 0 else pending.pop(0)
+        crashitem = self.collection[pending_item]
         self.pending.extend(pending)
         for node in self.node2pending:
             self.check_schedule(node)
