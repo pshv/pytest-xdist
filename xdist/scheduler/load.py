@@ -7,7 +7,7 @@ from xdist.workermanage import parse_spec_config
 from xdist.report import report_collection_diff
 
 
-class LoadScheduling:
+class LoadScheduling(object):
     """Implement load scheduling across nodes.
 
     This distributes the tests collected across all nodes so each test
@@ -133,10 +133,9 @@ class LoadScheduling:
             assert self.collection
             if collection != self.collection:
                 other_node = next(iter(self.node2collection.keys()))
-                msg = report_collection_diff(self.collection,
-                                             collection,
-                                             other_node.gateway.id,
-                                             node.gateway.id)
+                msg = report_collection_diff(
+                    self.collection, collection, other_node.gateway.id, node.gateway.id
+                )
                 self.log(msg)
                 return
         self.node2collection[node] = list(collection)
@@ -179,6 +178,9 @@ class LoadScheduling:
                     return
                 num_send = items_per_node_max - len(node_pending)
                 self._send_tests(node, num_send)
+        else:
+            node.shutdown()
+
         self.log("num items waiting for node:", len(self.pending))
 
     def remove_node(self, node):
@@ -228,7 +230,7 @@ class LoadScheduling:
 
         # XXX allow nodes to have different collections
         if not self._check_nodes_have_same_collection():
-            self.log('**Different tests collected, aborting run**')
+            self.log("**Different tests collected, aborting run**")
             return
 
         # Collections are identical, create the index of pending items.
@@ -240,8 +242,7 @@ class LoadScheduling:
         # Send a batch of tests to run. If we don't have at least two
         # tests per node, we have to send them all so that we can send
         # shutdown signals and get all nodes working.
-        initial_batch = max(len(self.pending) // 4,
-                            2 * len(self.nodes))
+        initial_batch = max(len(self.pending) // 4, 2 * len(self.nodes))
 
         # distribute tests round-robin up to the batch size
         # (or until we run out)
@@ -273,18 +274,15 @@ class LoadScheduling:
         same_collection = True
         for node, collection in node_collection_items[1:]:
             msg = report_collection_diff(
-                col,
-                collection,
-                first_node.gateway.id,
-                node.gateway.id,
+                col, collection, first_node.gateway.id, node.gateway.id
             )
             if msg:
                 same_collection = False
                 self.log(msg)
                 if self.config is not None:
                     rep = CollectReport(
-                        node.gateway.id, 'failed',
-                        longrepr=msg, result=[])
+                        node.gateway.id, "failed", longrepr=msg, result=[]
+                    )
                     self.config.hook.pytest_collectreport(report=rep)
 
         return same_collection

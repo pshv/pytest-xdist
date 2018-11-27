@@ -1,7 +1,100 @@
-pytest-xdist 1.22.2.1 (2018-04-19)
+pytest-xdist 1.24.1.1 (2018-11-27)
 ==================================
 
 No significant changes.
+
+
+
+pytest-xdist 1.24.1 (2018-11-09)
+================================
+
+Bug Fixes
+---------
+
+- `#349 <https://github.com/pytest-dev/pytest-xdist/issues/349>`_: Correctly handle warnings created with arguments that can't be serialized during the transfer from workers to master node.
+
+
+pytest-xdist 1.24.0 (2018-10-18)
+================================
+
+Features
+--------
+
+- `#337 <https://github.com/pytest-dev/pytest-xdist/issues/337>`_: New ``--maxprocesses`` command-line option that limits the maximum number of workers when using ``--numprocesses=auto``.
+
+
+Bug Fixes
+---------
+
+- `#351 <https://github.com/pytest-dev/pytest-xdist/issues/351>`_: Fix scheduling deadlock in case of inter-test locking.
+
+
+pytest-xdist 1.23.2 (2018-09-28)
+================================
+
+Bug Fixes
+---------
+
+- `#344 <https://github.com/pytest-dev/pytest-xdist/issues/344>`_: Fix issue where Warnings could cause pytest to fail if they do not set the args attribute correctly.
+
+
+pytest-xdist 1.23.1 (2018-09-25)
+================================
+
+Bug Fixes
+---------
+
+- `#341 <https://github.com/pytest-dev/pytest-xdist/issues/341>`_: Fix warnings transfer between workers and master node with pytest >= 3.8.
+
+
+pytest-xdist 1.23.0 (2018-08-23)
+================================
+
+Features
+--------
+
+- `#330 <https://github.com/pytest-dev/pytest-xdist/issues/330>`_: Improve collection performance by reducing the number of events sent to ``master`` node.
+
+
+pytest-xdist 1.22.5 (2018-07-27)
+================================
+
+Bug Fixes
+---------
+
+- `#321 <https://github.com/pytest-dev/pytest-xdist/issues/321>`_: Revert change that dropped support for ``pytest<3.4`` and require ``six``.
+
+  This change caused problems in some installations, and was a mistaken
+  in the first place as we should not change version requirements
+  in bug-fix releases unless they fix an actual bug.
+
+
+pytest-xdist 1.22.4 (2018-07-27)
+================================
+
+Bug Fixes
+---------
+
+- `#305 <https://github.com/pytest-dev/pytest-xdist/issues/305>`_: Remove last references to obsolete ``py.code``.
+
+  Remove some unnecessary references to ``py.builtin``.
+
+- `#316 <https://github.com/pytest-dev/pytest-xdist/issues/316>`_: Workaround cpu detection on Travis CI.
+
+
+pytest-xdist 1.22.3 (2018-07-23)
+================================
+
+Bug Fixes
+---------
+
+- Fix issue of virtualized or containerized environments not reporting the number of CPUs correctly. (`#9 <https://github.com/pytest-dev/pytest-xdist/issues/9>`_)
+
+
+Trivial Changes
+---------------
+
+- Make all classes subclass from ``object`` and fix ``super()`` call in ``LoadFileScheduling``; (`#297 <https://github.com/pytest-dev/pytest-xdist/issues/297>`_)
 
 
 pytest-xdist 1.22.2 (2018-02-26)

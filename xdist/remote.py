@@ -12,12 +12,13 @@ import time
 
 import _pytest.hookspec
 import pytest
+from execnet.gateway_base import dumps, DumpError
 
 
-class WorkerInteractor:
+class WorkerInteractor(object):
     def __init__(self, config, channel):
         self.config = config
-        self.workerid = config.workerinput.get('workerid', "?")
+        self.workerid = config.workerinput.get("workerid", "?")
         self.log = py.log.Producer("worker-%s" % self.workerid)
         if not config.option.debug:
             py.log.setconsumer(self.log._keywords, None)
@@ -39,7 +40,7 @@ class WorkerInteractor:
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_sessionfinish(self, exitstatus):
-        self.config.workeroutput['exitstatus'] = exitstatus
+        self.config.workeroutput["exitstatus"] = exitstatus
         yield
         self.sendevent("workerfinished", workeroutput=self.config.workeroutput)
 
@@ -56,7 +57,7 @@ class WorkerInteractor:
                 return True
             self.log("received command", name, kwargs)
             if name == "runtests":
-                torun.extend(kwargs['indices'])
+                torun.extend(kwargs["indices"])
             elif name == "runtests_all":
                 torun.extend(range(len(session.items)))
             self.log("items to run:", torun)
@@ -79,24 +80,25 @@ class WorkerInteractor:
             nextitem = None
 
         start = time.time()
-        self.config.hook.pytest_runtest_protocol(
-            item=item,
-            nextitem=nextitem)
+        self.config.hook.pytest_runtest_protocol(item=item, nextitem=nextitem)
         duration = time.time() - start
-        self.sendevent("runtest_protocol_complete", item_index=self.item_index,
-                       duration=duration)
+        self.sendevent(
+            "runtest_protocol_complete", item_index=self.item_index, duration=duration
+        )
 
     def pytest_collection_finish(self, session):
         self.sendevent(
             "collectionfinish",
             topdir=str(session.fspath),
-            ids=[item.nodeid for item in session.items])
+            ids=[item.nodeid for item in session.items],
+        )
 
     def pytest_runtest_logstart(self, nodeid, location):
         self.sendevent("logstart", nodeid=nodeid, location=location)
 
     # the pytest_runtest_logfinish hook was introduced in pytest 3.4
-    if hasattr(_pytest.hookspec, 'pytest_runtest_logfinish'):
+    if hasattr(_pytest.hookspec, "pytest_runtest_logfinish"):
+
         def pytest_runtest_logfinish(self, nodeid, location):
             self.sendevent("logfinish", nodeid=nodeid, location=location)
 
@@ -108,12 +110,31 @@ class WorkerInteractor:
         self.sendevent("testreport", data=data)
 
     def pytest_collectreport(self, report):
-        data = serialize_report(report)
-        self.sendevent("collectreport", data=data)
+        # send only reports that have not passed to master as optimization (#330)
+        if not report.passed:
+            data = serialize_report(report)
+            self.sendevent("collectreport", data=data)
 
     def pytest_logwarning(self, message, code, nodeid, fslocation):
-        self.sendevent("logwarning", message=message, code=code, nodeid=nodeid,
-                       fslocation=str(fslocation))
+        self.sendevent(
+            "logwarning",
+            message=message,
+            code=code,
+            nodeid=nodeid,
+            fslocation=str(fslocation),
+        )
+
+    # the pytest_warning_captured hook was introduced in pytest 3.8
+    if hasattr(_pytest.hookspec, "pytest_warning_captured"):
+
+        def pytest_warning_captured(self, warning_message, when, item):
+            self.sendevent(
+                "warning_captured",
+                warning_message_data=serialize_warning_message(warning_message),
+                when=when,
+                # item cannot be serialized and will always be None when used with xdist
+                item=None,
+            )
 
 
 def serialize_report(rep):
@@ -122,34 +143,33 @@ def serialize_report(rep):
         reprcrash = rep.longrepr.reprcrash.__dict__.copy()
 
         new_entries = []
-        for entry in reprtraceback['reprentries']:
-            entry_data = {
-                'type': type(entry).__name__,
-                'data': entry.__dict__.copy(),
-            }
-            for key, value in entry_data['data'].items():
-                if hasattr(value, '__dict__'):
-                    entry_data['data'][key] = value.__dict__.copy()
+        for entry in reprtraceback["reprentries"]:
+            entry_data = {"type": type(entry).__name__, "data": entry.__dict__.copy()}
+            for key, value in entry_data["data"].items():
+                if hasattr(value, "__dict__"):
+                    entry_data["data"][key] = value.__dict__.copy()
             new_entries.append(entry_data)
 
-        reprtraceback['reprentries'] = new_entries
+        reprtraceback["reprentries"] = new_entries
 
         return {
-            'reprcrash': reprcrash,
-            'reprtraceback': reprtraceback,
-            'sections': rep.longrepr.sections
+            "reprcrash": reprcrash,
+            "reprtraceback": reprtraceback,
+            "sections": rep.longrepr.sections,
         }
 
     import py
+
     d = rep.__dict__.copy()
-    if hasattr(rep.longrepr, 'toterminal'):
-        if hasattr(rep.longrepr, 'reprtraceback') \
-                and hasattr(rep.longrepr, 'reprcrash'):
-            d['longrepr'] = disassembled_report(rep)
+    if hasattr(rep.longrepr, "toterminal"):
+        if hasattr(rep.longrepr, "reprtraceback") and hasattr(
+            rep.longrepr, "reprcrash"
+        ):
+            d["longrepr"] = disassembled_report(rep)
         else:
-            d['longrepr'] = str(rep.longrepr)
+            d["longrepr"] = str(rep.longrepr)
     else:
-        d['longrepr'] = rep.longrepr
+        d["longrepr"] = rep.longrepr
     for name in d:
         if isinstance(d[name], py.path.local):
             d[name] = str(d[name])
@@ -158,8 +178,50 @@ def serialize_report(rep):
     return d
 
 
+def serialize_warning_message(warning_message):
+    if isinstance(warning_message.message, Warning):
+        message_module = type(warning_message.message).__module__
+        message_class_name = type(warning_message.message).__name__
+        message_str = str(warning_message.message)
+        # check now if we can serialize the warning arguments (#349)
+        # if not, we will just use the exception message on the master node
+        try:
+            dumps(warning_message.message.args)
+        except DumpError:
+            message_args = None
+        else:
+            message_args = warning_message.message.args
+    else:
+        message_str = warning_message.message
+        message_module = None
+        message_class_name = None
+        message_args = None
+    if warning_message.category:
+        category_module = warning_message.category.__module__
+        category_class_name = warning_message.category.__name__
+    else:
+        category_module = None
+        category_class_name = None
+
+    result = {
+        "message_str": message_str,
+        "message_module": message_module,
+        "message_class_name": message_class_name,
+        "message_args": message_args,
+        "category_module": category_module,
+        "category_class_name": category_class_name,
+    }
+    # access private _WARNING_DETAILS because the attributes vary between Python versions
+    for attr_name in warning_message._WARNING_DETAILS:
+        if attr_name in ("message", "category"):
+            continue
+        result[attr_name] = getattr(warning_message, attr_name)
+    return result
+
+
 def getinfodict():
     import platform
+
     return dict(
         version=sys.version,
         version_info=tuple(sys.version_info),
@@ -172,29 +234,32 @@ def getinfodict():
 
 def remote_initconfig(option_dict, args):
     from _pytest.config import Config
-    option_dict['plugins'].append("no:terminal")
+
+    option_dict["plugins"].append("no:terminal")
     config = Config.fromdictargs(option_dict, args)
     config.option.looponfail = False
     config.option.usepdb = False
     config.option.dist = "no"
     config.option.distload = False
     config.option.numprocesses = None
+    config.option.maxprocesses = None
     config.args = args
     return config
 
 
-if __name__ == '__channelexec__':
+if __name__ == "__channelexec__":
     channel = channel  # noqa
     workerinput, args, option_dict = channel.receive()
     importpath = os.getcwd()
     sys.path.insert(0, importpath)  # XXX only for remote situations
-    os.environ['PYTHONPATH'] = (
-        importpath + os.pathsep +
-        os.environ.get('PYTHONPATH', ''))
-    os.environ['PYTEST_XDIST_WORKER'] = workerinput['workerid']
-    os.environ['PYTEST_XDIST_WORKER_COUNT'] = str(workerinput['workercount'])
+    os.environ["PYTHONPATH"] = (
+        importpath + os.pathsep + os.environ.get("PYTHONPATH", "")
+    )
+    os.environ["PYTEST_XDIST_WORKER"] = workerinput["workerid"]
+    os.environ["PYTEST_XDIST_WORKER_COUNT"] = str(workerinput["workercount"])
     # os.environ['PYTHONPATH'] = importpath
     import py
+
     config = remote_initconfig(option_dict, args)
     config.workerinput = workerinput
     config.workeroutput = {}

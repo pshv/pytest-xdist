@@ -1,11 +1,13 @@
 import py
+import pprint
 import pytest
+
 from xdist.workermanage import WorkerController, unserialize_report
 from xdist.remote import serialize_report
 import execnet
 import marshal
 
-queue = py.builtin._tryimport("queue", "Queue")
+from six.moves.queue import Queue
 
 WAIT_TIMEOUT = 10.0
 
@@ -14,7 +16,7 @@ def check_marshallable(d):
     try:
         marshal.dumps(d)
     except ValueError:
-        py.std.pprint.pprint(d)
+        pprint.pprint(d)
         raise ValueError("not marshallable")
 
 
@@ -32,9 +34,9 @@ class WorkerSetup:
     def __init__(self, request, testdir):
         self.request = request
         self.testdir = testdir
-        self.events = queue.Queue()
+        self.events = Queue()
 
-    def setup(self, ):
+    def setup(self,):
         self.testdir.chdir()
         # import os ; os.environ['EXECNET_DEBUG'] = "2"
         self.gateway = execnet.makegateway()
@@ -44,8 +46,7 @@ class WorkerSetup:
         class DummyMananger:
             specs = [0, 1]
 
-        self.slp = WorkerController(DummyMananger, self.gateway, config,
-                                    putevent)
+        self.slp = WorkerController(DummyMananger, self.gateway, config, putevent)
         self.request.addfinalizer(self.slp.ensure_teardown)
         self.slp.setup()
 
@@ -58,7 +59,7 @@ class WorkerSetup:
             ev = EventCall(data)
             if name is None or ev.name == name:
                 return ev
-            print("skipping %s" % (ev, ))
+            print("skipping %s" % (ev,))
 
     def sendcommand(self, name, **kwargs):
         self.slp.sendcommand(name, **kwargs)
@@ -69,9 +70,10 @@ def worker(request, testdir):
     return WorkerSetup(request, testdir)
 
 
-@pytest.mark.xfail(reason='#59')
+@pytest.mark.xfail(reason="#59")
 def test_remoteinitconfig(testdir):
     from xdist.remote import remote_initconfig
+
     config1 = testdir.parseconfig()
     config2 = remote_initconfig(config1.option.__dict__, config1.args)
     assert config2.option.__dict__ == config1.option.__dict__
@@ -80,29 +82,33 @@ def test_remoteinitconfig(testdir):
 
 class TestReportSerialization:
     def test_xdist_longrepr_to_str_issue_241(self, testdir):
-        testdir.makepyfile("""
+        testdir.makepyfile(
+            """
             import os
             def test_a(): assert False
             def test_b(): pass
-        """)
-        testdir.makeconftest("""
+        """
+        )
+        testdir.makeconftest(
+            """
             def pytest_runtest_logreport(report):
                 print(report.longrepr)
-        """)
-        res = testdir.runpytest('-n1', '-s')
-        res.stdout.fnmatch_lines([
-            '*1 failed, 1 passed *'
-        ])
+        """
+        )
+        res = testdir.runpytest("-n1", "-s")
+        res.stdout.fnmatch_lines(["*1 failed, 1 passed *"])
 
     def test_xdist_report_longrepr_reprcrash_130(self, testdir):
-        reprec = testdir.inline_runsource("""
+        reprec = testdir.inline_runsource(
+            """
                     import py
                     def test_fail(): assert False, 'Expected Message'
-                """)
+                """
+        )
         reports = reprec.getreports("pytest_runtest_logreport")
         assert len(reports) == 3
         rep = reports[1]
-        added_section = ('Failure Metadata', str("metadata metadata"), "*")
+        added_section = ("Failure Metadata", str("metadata metadata"), "*")
         rep.longrepr.sections.append(added_section)
         d = serialize_report(rep)
         check_marshallable(d)
@@ -110,28 +116,31 @@ class TestReportSerialization:
         # Check assembled == rep
         assert a.__dict__.keys() == rep.__dict__.keys()
         for key in rep.__dict__.keys():
-            if key != 'longrepr':
+            if key != "longrepr":
                 assert getattr(a, key) == getattr(rep, key)
         assert rep.longrepr.reprcrash.lineno == a.longrepr.reprcrash.lineno
         assert rep.longrepr.reprcrash.message == a.longrepr.reprcrash.message
         assert rep.longrepr.reprcrash.path == a.longrepr.reprcrash.path
-        assert rep.longrepr.reprtraceback.entrysep \
-            == a.longrepr.reprtraceback.entrysep
-        assert rep.longrepr.reprtraceback.extraline \
-            == a.longrepr.reprtraceback.extraline
-        assert rep.longrepr.reprtraceback.style \
-            == a.longrepr.reprtraceback.style
+        assert rep.longrepr.reprtraceback.entrysep == a.longrepr.reprtraceback.entrysep
+        assert (
+            rep.longrepr.reprtraceback.extraline == a.longrepr.reprtraceback.extraline
+        )
+        assert rep.longrepr.reprtraceback.style == a.longrepr.reprtraceback.style
         assert rep.longrepr.sections == a.longrepr.sections
         # Missing section attribute PR171
         assert added_section in a.longrepr.sections
 
     def test_reprentries_serialization_170(self, testdir):
         from _pytest._code.code import ReprEntry
-        reprec = testdir.inline_runsource("""
+
+        reprec = testdir.inline_runsource(
+            """
                             def test_repr_entry():
                                 x = 0
                                 assert x
-                        """, '--showlocals')
+                        """,
+            "--showlocals",
+        )
         reports = reprec.getreports("pytest_runtest_logreport")
         assert len(reports) == 3
         rep = reports[1]
@@ -145,7 +154,9 @@ class TestReportSerialization:
             assert rep_entries[i].lines == a_entries[i].lines
             assert rep_entries[i].localssep == a_entries[i].localssep
             assert rep_entries[i].reprfileloc.lineno == a_entries[i].reprfileloc.lineno
-            assert rep_entries[i].reprfileloc.message == a_entries[i].reprfileloc.message
+            assert (
+                rep_entries[i].reprfileloc.message == a_entries[i].reprfileloc.message
+            )
             assert rep_entries[i].reprfileloc.path == a_entries[i].reprfileloc.path
             assert rep_entries[i].reprfuncargs.args == a_entries[i].reprfuncargs.args
             assert rep_entries[i].reprlocals.lines == a_entries[i].reprlocals.lines
@@ -153,11 +164,15 @@ class TestReportSerialization:
 
     def test_reprentries_serialization_196(self, testdir):
         from _pytest._code.code import ReprEntryNative
-        reprec = testdir.inline_runsource("""
+
+        reprec = testdir.inline_runsource(
+            """
                             def test_repr_entry_native():
                                 x = 0
                                 assert x
-                        """, '--tb=native')
+                        """,
+            "--tb=native",
+        )
         reports = reprec.getreports("pytest_runtest_logreport")
         assert len(reports) == 3
         rep = reports[1]
@@ -171,7 +186,8 @@ class TestReportSerialization:
             assert rep_entries[i].lines == a_entries[i].lines
 
     def test_itemreport_outcomes(self, testdir):
-        reprec = testdir.inline_runsource("""
+        reprec = testdir.inline_runsource(
+            """
             import py
             def test_pass(): pass
             def test_fail(): 0/0
@@ -183,7 +199,8 @@ class TestReportSerialization:
             def test_xfail(): 0/0
             def test_xfail_imperative():
                 py.test.xfail("hello")
-        """)
+        """
+        )
         reports = reprec.getreports("pytest_runtest_logreport")
         assert len(reports) == 17  # with setup/teardown "passed" reports
         for rep in reports:
@@ -245,10 +262,12 @@ class TestReportSerialization:
 
 class TestWorkerInteractor:
     def test_basic_collect_and_runtests(self, worker):
-        worker.testdir.makepyfile("""
+        worker.testdir.makepyfile(
+            """
             def test_func():
                 pass
-        """)
+        """
+        )
         worker.setup()
         ev = worker.popevent()
         assert ev.name == "workerready"
@@ -256,8 +275,8 @@ class TestWorkerInteractor:
         assert ev.name == "collectionstart"
         assert not ev.kwargs
         ev = worker.popevent("collectionfinish")
-        assert ev.kwargs['topdir'] == worker.testdir.tmpdir
-        ids = ev.kwargs['ids']
+        assert ev.kwargs["topdir"] == worker.testdir.tmpdir
+        ids = ev.kwargs["ids"]
         assert len(ids) == 1
         worker.sendcommand("runtests", indices=list(range(len(ids))))
         worker.sendcommand("shutdown")
@@ -267,31 +286,30 @@ class TestWorkerInteractor:
         ev = worker.popevent("testreport")  # setup
         ev = worker.popevent("testreport")
         assert ev.name == "testreport"
-        rep = unserialize_report(ev.name, ev.kwargs['data'])
+        rep = unserialize_report(ev.name, ev.kwargs["data"])
         assert rep.nodeid.endswith("::test_func")
         assert rep.passed
         assert rep.when == "call"
         ev = worker.popevent("workerfinished")
-        assert 'workeroutput' in ev.kwargs
+        assert "workeroutput" in ev.kwargs
 
-    @pytest.mark.skipif(pytest.__version__ >= '3.0',
-                        reason='skip at module level illegal in pytest 3.0')
     def test_remote_collect_skip(self, worker):
-        worker.testdir.makepyfile("""
-            import py
-            py.test.skip("hello")
-        """)
+        worker.testdir.makepyfile(
+            """
+            import pytest
+            pytest.skip("hello", allow_module_level=True)
+        """
+        )
         worker.setup()
         ev = worker.popevent("collectionstart")
         assert not ev.kwargs
         ev = worker.popevent()
         assert ev.name == "collectreport"
-        ev = worker.popevent()
-        assert ev.name == "collectreport"
-        rep = unserialize_report(ev.name, ev.kwargs['data'])
+        rep = unserialize_report(ev.name, ev.kwargs["data"])
         assert rep.skipped
+        assert rep.longrepr[2] == "Skipped: hello"
         ev = worker.popevent("collectionfinish")
-        assert not ev.kwargs['ids']
+        assert not ev.kwargs["ids"]
 
     def test_remote_collect_fail(self, worker):
         worker.testdir.makepyfile("""aasd qwe""")
@@ -300,18 +318,18 @@ class TestWorkerInteractor:
         assert not ev.kwargs
         ev = worker.popevent()
         assert ev.name == "collectreport"
-        ev = worker.popevent()
-        assert ev.name == "collectreport"
-        rep = unserialize_report(ev.name, ev.kwargs['data'])
+        rep = unserialize_report(ev.name, ev.kwargs["data"])
         assert rep.failed
         ev = worker.popevent("collectionfinish")
-        assert not ev.kwargs['ids']
+        assert not ev.kwargs["ids"]
 
     def test_runtests_all(self, worker):
-        worker.testdir.makepyfile("""
+        worker.testdir.makepyfile(
+            """
             def test_func(): pass
             def test_func2(): pass
-        """)
+        """
+        )
         worker.setup()
         ev = worker.popevent()
         assert ev.name == "workerready"
@@ -319,57 +337,63 @@ class TestWorkerInteractor:
         assert ev.name == "collectionstart"
         assert not ev.kwargs
         ev = worker.popevent("collectionfinish")
-        ids = ev.kwargs['ids']
+        ids = ev.kwargs["ids"]
         assert len(ids) == 2
-        worker.sendcommand("runtests_all", )
-        worker.sendcommand("shutdown", )
+        worker.sendcommand("runtests_all")
+        worker.sendcommand("shutdown")
         for func in "::test_func", "::test_func2":
             for i in range(3):  # setup/call/teardown
                 ev = worker.popevent("testreport")
                 assert ev.name == "testreport"
-                rep = unserialize_report(ev.name, ev.kwargs['data'])
+                rep = unserialize_report(ev.name, ev.kwargs["data"])
                 assert rep.nodeid.endswith(func)
         ev = worker.popevent("workerfinished")
-        assert 'workeroutput' in ev.kwargs
+        assert "workeroutput" in ev.kwargs
 
     def test_happy_run_events_converted(self, testdir, worker):
         py.test.xfail("implement a simple test for event production")
         assert not worker.use_callback
-        worker.testdir.makepyfile("""
+        worker.testdir.makepyfile(
+            """
             def test_func():
                 pass
-        """)
+        """
+        )
         worker.setup()
         hookrec = testdir.getreportrecorder(worker.config)
         for data in worker.slp.channel:
             worker.slp.process_from_remote(data)
         worker.slp.process_from_remote(worker.slp.ENDMARK)
-        py.std.pprint.pprint(hookrec.hookrecorder.calls)
-        hookrec.hookrecorder.contains([
-            ("pytest_collectstart", "collector.fspath == aaa"),
-            ("pytest_pycollect_makeitem", "name == 'test_func'"),
-            ("pytest_collectreport", "report.collector.fspath == aaa"),
-            ("pytest_collectstart", "collector.fspath == bbb"),
-            ("pytest_pycollect_makeitem", "name == 'test_func'"),
-            ("pytest_collectreport", "report.collector.fspath == bbb"),
-        ])
+        pprint.pprint(hookrec.hookrecorder.calls)
+        hookrec.hookrecorder.contains(
+            [
+                ("pytest_collectstart", "collector.fspath == aaa"),
+                ("pytest_pycollect_makeitem", "name == 'test_func'"),
+                ("pytest_collectreport", "report.collector.fspath == aaa"),
+                ("pytest_collectstart", "collector.fspath == bbb"),
+                ("pytest_pycollect_makeitem", "name == 'test_func'"),
+                ("pytest_collectreport", "report.collector.fspath == bbb"),
+            ]
+        )
 
     def test_process_from_remote_error_handling(self, worker, capsys):
         worker.use_callback = True
         worker.setup()
-        worker.slp.process_from_remote(('<nonono>', ()))
+        worker.slp.process_from_remote(("<nonono>", ()))
         out, err = capsys.readouterr()
-        assert 'INTERNALERROR> ValueError: unknown event: <nonono>' in out
+        assert "INTERNALERROR> ValueError: unknown event: <nonono>" in out
         ev = worker.popevent()
         assert ev.name == "errordown"
 
 
 def test_remote_env_vars(testdir):
-    testdir.makepyfile('''
+    testdir.makepyfile(
+        """
         import os
         def test():
             assert os.environ['PYTEST_XDIST_WORKER'] in ('gw0', 'gw1')
             assert os.environ['PYTEST_XDIST_WORKER_COUNT'] == '2'
-    ''')
-    result = testdir.runpytest('-n2', '--max-worker-restart=0')
+    """
+    )
+    result = testdir.runpytest("-n2", "--max-worker-restart=0")
     assert result.ret == 0

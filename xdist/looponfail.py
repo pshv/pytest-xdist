@@ -1,34 +1,38 @@
 """
-    Implement -f aka looponfailing for py.test.
+    Implement -f aka looponfailing for pytest.
 
     NOTE that we try to avoid loading and depending on application modules
     within the controlling process (the one that starts repeatedly test
     processes) otherwise changes to source code can crash
     the controlling process which should best never happen.
 """
-
+from __future__ import print_function
 import py
 import pytest
 import sys
+import time
 import execnet
 
 
 def pytest_addoption(parser):
     group = parser.getgroup("xdist", "distributed and subprocess testing")
     group._addoption(
-        '-f', '--looponfail',
-        action="store_true", dest="looponfail", default=False,
+        "-f",
+        "--looponfail",
+        action="store_true",
+        dest="looponfail",
+        default=False,
         help="run tests in subprocess, wait for modified files "
-             "and re-run failing test set until all pass.")
+        "and re-run failing test set until all pass.",
+    )
 
 
 def pytest_cmdline_main(config):
 
     if config.getoption("looponfail"):
-        usepdb = config.getoption('usepdb')  # a core option
+        usepdb = config.getoption("usepdb")  # a core option
         if usepdb:
-            raise pytest.UsageError(
-                "--pdb incompatible with --looponfail.")
+            raise pytest.UsageError("--pdb incompatible with --looponfail.")
         looponfail_main(config)
         return 2  # looponfail only can get stop with ctrl-C anyway
 
@@ -44,8 +48,8 @@ def looponfail_main(config):
                 # the last failures passed, let's immediately rerun all
                 continue
             repr_pytest_looponfailinfo(
-                failreports=remotecontrol.failures,
-                rootdirs=rootdirs)
+                failreports=remotecontrol.failures, rootdirs=rootdirs
+            )
             statrecorder.waitonchange(checkinterval=2.0)
     except KeyboardInterrupt:
         print()
@@ -59,7 +63,7 @@ class RemoteControl(object):
     def trace(self, *args):
         if self.config.option.debug:
             msg = " ".join([str(x) for x in args])
-            py.builtin.print_("RemoteControl:", msg)
+            print("RemoteControl:", msg)
 
     def initgateway(self):
         return execnet.makegateway("popen")
@@ -67,7 +71,7 @@ class RemoteControl(object):
     def setup(self, out=None):
         if out is None:
             out = py.io.TerminalWriter()
-        if hasattr(self, 'gateway'):
+        if hasattr(self, "gateway"):
             raise ValueError("already have gateway %r" % self.gateway)
         self.trace("setting up worker session")
         self.gateway = self.initgateway()
@@ -81,15 +85,16 @@ class RemoteControl(object):
         def write(s):
             out._file.write(s)
             out._file.flush()
+
         remote_outchannel.setcallback(write)
 
     def ensure_teardown(self):
-        if hasattr(self, 'channel'):
+        if hasattr(self, "channel"):
             if not self.channel.isclosed():
                 self.trace("closing", self.channel)
                 self.channel.close()
             del self.channel
-        if hasattr(self, 'gateway'):
+        if hasattr(self, "gateway"):
             self.trace("exiting", self.gateway)
             self.gateway.exit()
             del self.gateway
@@ -137,8 +142,9 @@ def repr_pytest_looponfailinfo(failreports, rootdirs):
 def init_worker_session(channel, args, option_dict):
     import os
     import sys
+
     outchannel = channel.gateway.newchannel()
-    sys.stdout = sys.stderr = outchannel.makefile('w')
+    sys.stdout = sys.stderr = outchannel.makefile("w")
     channel.send(outchannel)
     # prune sys.path to not contain relative paths
     newpaths = []
@@ -151,13 +157,15 @@ def init_worker_session(channel, args, option_dict):
 
     # fullwidth, hasmarkup = channel.receive()
     from _pytest.config import Config
+
     config = Config.fromdictargs(option_dict, list(args))
     config.args = args
     from xdist.looponfail import WorkerFailSession
+
     WorkerFailSession(config, channel).main()
 
 
-class WorkerFailSession:
+class WorkerFailSession(object):
     def __init__(self, config, channel):
         self.config = config
         self.channel = channel
@@ -180,7 +188,8 @@ class WorkerFailSession:
         except pytest.UsageError:
             items = session.perform_collect(None)
         hook.pytest_collection_modifyitems(
-            session=session, config=session.config, items=items)
+            session=session, config=session.config, items=items
+        )
         hook.pytest_collection_finish(session=session)
         return True
 
@@ -206,12 +215,12 @@ class WorkerFailSession:
         for rep in self.recorded_failures:
             trails.append(rep.nodeid)
             loc = rep.longrepr
-            loc = str(getattr(loc, 'reprcrash', loc))
+            loc = str(getattr(loc, "reprcrash", loc))
             failreports.append(loc)
         self.channel.send((trails, failreports, self.collection_failed))
 
 
-class StatRecorder:
+class StatRecorder(object):
     def __init__(self, rootdirlist):
         self.rootdirlist = rootdirlist
         self.statcache = {}
@@ -228,7 +237,7 @@ class StatRecorder:
             changed = self.check()
             if changed:
                 return
-            py.std.time.sleep(checkinterval)
+            time.sleep(checkinterval)
 
     def check(self, removepycfiles=True):  # noqa, too complex
         changed = False
@@ -244,10 +253,12 @@ class StatRecorder:
                         changed = True
                 else:
                     if oldstat:
-                        if oldstat.mtime != curstat.mtime or \
-                           oldstat.size != curstat.size:
+                        if (
+                            oldstat.mtime != curstat.mtime
+                            or oldstat.size != curstat.size
+                        ):
                             changed = True
-                            py.builtin.print_("# MODIFIED", path)
+                            print("# MODIFIED", path)
                             if removepycfiles and path.ext == ".py":
                                 pycfile = path + "c"
                                 if pycfile.check():

@@ -4,7 +4,7 @@ from xdist.workermanage import parse_spec_config
 from xdist.report import report_collection_diff
 
 
-class EachScheduling:
+class EachScheduling(object):
     """Implement scheduling of test items on all nodes
 
     If a node gets added after the test run is started then it is
@@ -86,10 +86,12 @@ class EachScheduling:
                 if deadnode.gateway.spec == node.gateway.spec:
                     dead_collection = self.node2collection[deadnode]
                     if collection != dead_collection:
-                        msg = report_collection_diff(dead_collection,
-                                                     collection,
-                                                     deadnode.gateway.id,
-                                                     node.gateway.id)
+                        msg = report_collection_diff(
+                            dead_collection,
+                            collection,
+                            deadnode.gateway.id,
+                            node.gateway.id,
+                        )
                         self.log(msg)
                         return
                     pending = self._removed2pending.pop(deadnode)
@@ -124,6 +126,7 @@ class EachScheduling:
             if not pending:
                 pending[:] = range(len(self.node2collection[node]))
                 node.send_runtest_all()
+                node.shutdown()
             else:
                 node.send_runtest_some(pending)
             self._started.append(node)
