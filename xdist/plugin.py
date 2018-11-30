@@ -70,7 +70,7 @@ def pytest_addoption(parser):
         "--dist",
         metavar="distmode",
         action="store",
-        choices=["each", "load", "loadscope", "loadfile", "no"],
+        choices=["each", "load", "loadscope", "loadfile", "template", "no"],
         dest="dist",
         default="no",
         help=(
@@ -82,6 +82,8 @@ def pytest_addoption(parser):
             " the same scope to any available environment.\n\n"
             "loadfile: load balance by sending test grouped by file"
             " to any available environment.\n\n"
+            "template: select tests according to predefined templates."
+            " Selection pattern can be set in dist_templ option \n\n"
             "(default) no: run tests inprocess, don't distribute."
         ),
     )
@@ -134,6 +136,11 @@ def pytest_addoption(parser):
         "list of (relative) glob-style paths to be ignored " "for rsyncing.",
         type="pathlist",
     )
+    parser.addini(
+        "dist-templ",
+        "templates for tests groups to be run on different nodes. "
+        "Mandatory with dist=template.", type="args",
+        default=[])
     parser.addini(
         "looponfailroots",
         type="pathlist",
