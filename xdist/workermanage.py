@@ -2,6 +2,7 @@ from __future__ import print_function
 import fnmatch
 import os
 import re
+import sys
 import threading
 
 import py
@@ -213,6 +214,7 @@ class WorkerController(object):
             "workercount": len(nodemanager.specs),
             "slaveid": gateway.id,
             "slavecount": len(nodemanager.specs),
+            "mainargv": sys.argv,
         }
         # TODO: deprecated name, backward compatibility only. Remove it in future
         self.slaveinput = self.workerinput
@@ -243,7 +245,9 @@ class WorkerController(object):
                 option_dict["basetemp"] = str(basetemp.join(name))
         self.config.hook.pytest_configure_node(node=self)
         self.channel = self.gateway.remote_exec(xdist.remote)
-        self.channel.send((self.workerinput, args, option_dict))
+        # change sys.path only for remote workers
+        change_sys_path = not self.gateway.spec.popen
+        self.channel.send((self.workerinput, args, option_dict, change_sys_path))
         if self.putevent:
             self.channel.setcallback(self.process_from_remote, endmarker=self.ENDMARK)
 
@@ -345,7 +349,11 @@ class WorkerController(object):
         except:  # noqa
             from _pytest._code import ExceptionInfo
 
-            excinfo = ExceptionInfo()
+            # ExceptionInfo API changed in pytest 4.1
+            if hasattr(ExceptionInfo, "from_current"):
+                excinfo = ExceptionInfo.from_current()
+            else:
+                excinfo = ExceptionInfo()
             print("!" * 20, excinfo)
             self.config.notify_exception(excinfo)
             self.shutdown()
