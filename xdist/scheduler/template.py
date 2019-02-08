@@ -297,11 +297,15 @@ class TemplateScheduling:
         Sends shutdown to all nodes except first one in case if all
         async items was distributed
         """
-        # All async items distributed, shutdown all nodes starting from 2
+        # All async items distributed, shutdown all nodes except one
         if not self.pending_async:
-            for node in self.nodes[1:]:
+            any_running_node = False
+            for node in self.nodes:
                 if not node.shutting_down:
-                    node.shutdown()
+                    if any_running_node:
+                        node.shutdown()
+                        continue
+                    any_running_node = True
 
     def _check_nodes_have_same_collection(self):
         """Return True if all nodes have collected the same items.
