@@ -47,9 +47,9 @@ class DSession(object):
         self._failed_collection_errors = {}
         self._active_nodes = set()
         self._failed_nodes_count = 0
-        self._max_worker_restart = self.config.option.maxworkerrestart
-        if self._max_worker_restart is not None:
-            self._max_worker_restart = int(self._max_worker_restart)
+        self._max_worker_restart = get_default_max_worker_restart(self.config)
+        # summary message to print at the end of the session
+        self._summary_report = None
         try:
             self.terminal = config.pluginmanager.getplugin("terminalreporter")
         except KeyError:
@@ -200,14 +200,22 @@ class DSession(object):
         )
         if maximum_reached:
             if self._max_worker_restart == 0:
-                msg = "Worker restarting disabled"
+                msg = "worker {} crashed and worker restarting disabled".format(
+                    node.gateway.id
+                )
             else:
-                msg = "Maximum crashed workers reached: %d" % self._max_worker_restart
-            self.report_line(msg)
+                msg = "maximum crashed workers reached: %d" % self._max_worker_restart
+            self._summary_report = msg
+            self.report_line("\n" + msg)
+            self.triggershutdown()
         else:
-            self.report_line("Replacing crashed worker %s" % node.gateway.id)
+            self.report_line("\nreplacing crashed worker %s" % node.gateway.id)
             self._clone_node(node)
         self._active_nodes.remove(node)
+
+    def pytest_terminal_summary(self, terminalreporter):
+        if self.config.option.verbose >= 0 and self._summary_report:
+            terminalreporter.write_sep("=", "xdist: {}".format(self._summary_report))
 
     def worker_collectionfinish(self, node, ids):
         """worker has finished test collection.
@@ -318,7 +326,7 @@ class DSession(object):
         # XXX count no of failures and retry N times
         runner = self.config.pluginmanager.getplugin("runner")
         fspath = nodeid.split("::")[0]
-        msg = "Worker %r crashed while running %r" % (worker.gateway.id, nodeid)
+        msg = "worker %r crashed while running %r" % (worker.gateway.id, nodeid)
         rerun_count = self.config.cache.get('xdist/rerun', 0)
         test_status = "rerun" if rerun_count > 0 else "failed"
         self.config.cache.set('xdist/rerun', rerun_count - 1)
@@ -395,10 +403,16 @@ class TerminalDistReporter(object):
             return
         self.write_line("[%s] node down: %s" % (node.gateway.id, error))
 
-    # def pytest_xdist_rsyncstart(self, source, gateways):
-    #    targets = ",".join([gw.id for gw in gateways])
-    #    msg = "[%s] rsyncing: %s" %(targets, source)
-    #    self.write_line(msg)
-    # def pytest_xdist_rsyncfinish(self, source, gateways):
-    #    targets = ", ".join(["[%s]" % gw.id for gw in gateways])
-    #    self.write_line("rsyncfinish: %s -> %s" %(source, targets))
+
+def get_default_max_worker_restart(config):
+    """gets the default value of --max-worker-restart option if it is not provided.
+
+    Use a reasonable default to avoid workers from restarting endlessly due to crashing collections (#226).
+    """
+    result = config.option.maxworkerrestart
+    if result is not None:
+        result = int(result)
+    elif config.option.numprocesses:
+        # if --max-worker-restart was not provided, use a reasonable default (#226)
+        result = config.option.numprocesses * 4
+    return result

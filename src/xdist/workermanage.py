@@ -3,15 +3,12 @@ import fnmatch
 import os
 import re
 import sys
-import threading
 
 import py
 import pytest
 import execnet
 
 import xdist.remote
-
-from _pytest import runner  # XXX load dynamically
 
 
 def parse_spec_config(config):
@@ -37,7 +34,6 @@ class NodeManager(object):
 
     def __init__(self, config, specs=None, defaultchdir="pyexecnetcache"):
         self.config = config
-        self._nodesready = threading.Event()
         self.trace = self.config.trace.get("nodemanager")
         self.group = execnet.Group()
         if specs is None:
@@ -204,7 +200,13 @@ def make_reltoroot(roots, args):
 class WorkerController(object):
     ENDMARK = -1
 
+    class RemoteHook:
+        @pytest.mark.trylast
+        def pytest_xdist_getremotemodule(self):
+            return xdist.remote
+
     def __init__(self, nodemanager, gateway, config, putevent):
+        config.pluginmanager.register(self.RemoteHook())
         self.nodemanager = nodemanager
         self.putevent = putevent
         self.gateway = gateway
@@ -244,10 +246,13 @@ class WorkerController(object):
                 basetemp = self.config._tmpdirhandler.getbasetemp()
                 option_dict["basetemp"] = str(basetemp.join(name))
         self.config.hook.pytest_configure_node(node=self)
-        self.channel = self.gateway.remote_exec(xdist.remote)
+
+        remote_module = self.config.hook.pytest_xdist_getremotemodule()
+        self.channel = self.gateway.remote_exec(remote_module)
         # change sys.path only for remote workers
         change_sys_path = not self.gateway.spec.popen
         self.channel.send((self.workerinput, args, option_dict, change_sys_path))
+
         if self.putevent:
             self.channel.setcallback(self.process_from_remote, endmarker=self.ENDMARK)
 
@@ -315,7 +320,9 @@ class WorkerController(object):
                 self.notify_inproc(eventname, node=self, **kwargs)
             elif eventname in ("testreport", "collectreport", "teardownreport"):
                 item_index = kwargs.pop("item_index", None)
-                rep = unserialize_report(eventname, kwargs["data"])
+                rep = self.config.hook.pytest_report_from_serializable(
+                    config=self.config, data=kwargs["data"]
+                )
                 if item_index is not None:
                     rep.item_index = item_index
                 self.notify_inproc(eventname, node=self, rep=rep)
@@ -360,73 +367,6 @@ class WorkerController(object):
             self.notify_inproc("errordown", node=self, error=excinfo)
 
 
-def unserialize_report(name, reportdict):
-    def assembled_report(reportdict):
-        from _pytest._code.code import (
-            ReprEntry,
-            ReprEntryNative,
-            ReprExceptionInfo,
-            ReprFileLocation,
-            ReprFuncArgs,
-            ReprLocals,
-            ReprTraceback,
-        )
-
-        if reportdict["longrepr"]:
-            if (
-                "reprcrash" in reportdict["longrepr"]
-                and "reprtraceback" in reportdict["longrepr"]
-            ):
-
-                reprtraceback = reportdict["longrepr"]["reprtraceback"]
-                reprcrash = reportdict["longrepr"]["reprcrash"]
-
-                unserialized_entries = []
-                reprentry = None
-                for entry_data in reprtraceback["reprentries"]:
-                    data = entry_data["data"]
-                    entry_type = entry_data["type"]
-                    if entry_type == "ReprEntry":
-                        reprfuncargs = None
-                        reprfileloc = None
-                        reprlocals = None
-                        if data["reprfuncargs"]:
-                            reprfuncargs = ReprFuncArgs(**data["reprfuncargs"])
-                        if data["reprfileloc"]:
-                            reprfileloc = ReprFileLocation(**data["reprfileloc"])
-                        if data["reprlocals"]:
-                            reprlocals = ReprLocals(data["reprlocals"]["lines"])
-
-                        reprentry = ReprEntry(
-                            lines=data["lines"],
-                            reprfuncargs=reprfuncargs,
-                            reprlocals=reprlocals,
-                            filelocrepr=reprfileloc,
-                            style=data["style"],
-                        )
-                    elif entry_type == "ReprEntryNative":
-                        reprentry = ReprEntryNative(data["lines"])
-                    else:
-                        report_unserialization_failure(entry_type, name, reportdict)
-                    unserialized_entries.append(reprentry)
-                reprtraceback["reprentries"] = unserialized_entries
-
-                exception_info = ReprExceptionInfo(
-                    reprtraceback=ReprTraceback(**reprtraceback),
-                    reprcrash=ReprFileLocation(**reprcrash),
-                )
-
-                for section in reportdict["longrepr"]["sections"]:
-                    exception_info.addsection(*section)
-                reportdict["longrepr"] = exception_info
-        return reportdict
-
-    if name == "testreport":
-        return runner.TestReport(**assembled_report(reportdict))
-    elif name == "collectreport":
-        return runner.CollectReport(**assembled_report(reportdict))
-
-
 def unserialize_warning_message(data):
     import warnings
     import importlib
@@ -467,17 +407,3 @@ def unserialize_warning_message(data):
         kwargs[attr_name] = data[attr_name]
 
     return warnings.WarningMessage(**kwargs)
-
-
-def report_unserialization_failure(type_name, report_name, reportdict):
-    from pprint import pprint
-
-    url = "https://github.com/pytest-dev/pytest-xdist/issues"
-    stream = py.io.TextIO()
-    pprint("-" * 100, stream=stream)
-    pprint("INTERNALERROR: Unknown entry type returned: %s" % type_name, stream=stream)
-    pprint("report_name: %s" % report_name, stream=stream)
-    pprint(reportdict, stream=stream)
-    pprint("Please report this bug at %s" % url, stream=stream)
-    pprint("-" * 100, stream=stream)
-    assert 0, stream.getvalue()
